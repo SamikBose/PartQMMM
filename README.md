@@ -87,7 +87,7 @@ python orca_inputs.py --top system_1264.parm7 --traj prod.dcd \
 
 - `--resnum-offset` : PDB→topology residue-number offset. Default **−4**
   (tleap/CHARMM-GUI AMBER renumbering with 3HS4 residues 1–3 unresolved). Set 0
-  if your topology preserves PDB numbering.
+  if your topology preserves PDB numbering. [TODO: get rid of this dependency from the partition file]
 - `--mm-cutoff` : keep **whole MM residues/molecules** when at least one of
   their MM atoms lies within this Å of any QM atom (0 = all). This avoids the
   old atom-wise cutoff artifact where half-waters or partial charged residues
@@ -103,11 +103,15 @@ python orca_inputs.py --top system_1264.parm7 --traj prod.dcd \
   `%pointcharges` (electrostatic embedding: QM density polarizes in the MM
   field).
 - `frame_{idx}.pc` — ORCA point-charge file (count line, then `q x y z`).
+[TODO: Better numbering based on run,frame idx from MD]
 
 ## Dependencies
 
 `mdtraj`, `parmed`, `numpy` (and `scipy` only if `--mm-cutoff` is used). No
-OpenMM dependency (topology read via mdtraj/parmed).
+OpenMM dependency (topology read via mdtraj/parmed). 
+
+[Right now works with amber ff because of the better metal ffs but can be extended 
+easily to charmm]
 
 ## Notes / gotchas baked in
 
