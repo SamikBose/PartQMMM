@@ -113,8 +113,7 @@ OpenMM dependency (topology read via mdtraj/parmed).
 [Right now works with amber ff because of the better metal ffs but can be extended 
 easily to charmm]
 
-## Notes / gotchas baked in
-
+## Notes 
 - Virtual sites (OPC `EPW`, atomic number 0) are excluded from the QM region
   (QM engines reject them); the whole water is still removed from the MM field
   when selected into QM.
