@@ -1,5 +1,5 @@
 # PartQMMM
-# QM/MM Subsystem Partitioning & QM-Engine Input Generation
+## QM/MM Subsystem Partitioning & QM-Engine Input Generation
 
 Tools to partition an MD trajectory into QM and MM subsystems (link-atom
 boundary scheme) and generate **electrostatic-embedding** QM/MM single-point
