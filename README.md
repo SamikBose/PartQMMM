@@ -32,6 +32,8 @@ boundary-charge redistribution); the driver layer does the file format.
   its backbone neighbors (N, C, HA) — Walker-Crowley-Case
   (*J. Comput. Chem.* 2008, 29, 1019). Keeps total charge integral and avoids
   over-polarizing the QM density with a fractional charge on the cut bond.
+- This has been previously implemented and benchmarked as charged smearing scheme in
+  (*J. Phys. Chem. B* 2016, 120, 4410−4420) by Bose and co-authors.
 
 ## QM regions (for hCA II + acetazolamide)
 
