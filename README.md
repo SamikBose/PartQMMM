@@ -19,6 +19,7 @@ orca_inputs.py      <- ORCA driver (imports qmmm_partition)
                        FramePartition -> frame_*.inp + frame_*.pc
 
 (future) psi4_inputs.py, qchem_inputs.py  <- same backend, different writer
+(future) Add the partition only workflow directly to the AIMNet training data generation pipeline...
 ```
 
 The partition layer does the science (region selection, link-atom placement,
