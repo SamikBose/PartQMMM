@@ -1,0 +1,10 @@
+{
+  "top": "/dickson/s1/bosesami/mlmm/DA_sim_setup/MD_sims/system_1264.parm7",
+  "runs": [
+    {"name": "run1", "traj": "/dickson/s1/bosesami/mlmm/DA_sim_setup/MD_sims/hca2_azm_withwater_run1_combined.dcd"},
+    {"name": "run2", "traj": "/dickson/s1/bosesami/mlmm/DA_sim_setup/MD_sims/hca2_azm_withwater_run2_combined.dcd"},
+    {"name": "run3", "traj": "/dickson/s1/bosesami/mlmm/DA_sim_setup/MD_sims/hca2_azm_withwater_run3_combined.dcd"},
+    {"name": "run4", "traj": "/dickson/s1/bosesami/mlmm/DA_sim_setup/MD_sims/hca2_azm_withwater_run4_combined.dcd"},
+    {"name": "run5", "traj": "/dickson/s1/bosesami/mlmm/DA_sim_setup/MD_sims/hca2_azm_withwater_run5_combined.dcd"}
+  ]
+}

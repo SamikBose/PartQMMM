@@ -1,0 +1,10 @@
+{
+  "top": "/path/to/system_1264.parm7",
+  "runs": [
+    {"name": "run1", "traj": "/path/to/run1.nc"},
+    {"name": "run2", "traj": "/path/to/run2.nc"},
+    {"name": "run3", "traj": "/path/to/run3.nc"},
+    {"name": "run4", "traj": "/path/to/run4.nc"},
+    {"name": "run5", "traj": "/path/to/run5.nc"}
+  ]
+}

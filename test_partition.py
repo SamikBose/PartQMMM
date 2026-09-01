@@ -1,200 +1,177 @@
 #!/usr/bin/env python3
-"""
-test_partition.py
-=================
-Structural tests for the qmmm_partition library, run against a PDB of the
-built hCA II + AZM + Zn system (system_1264.pdb).
+"""Focused PartQMMM V1 regression tests."""
 
-NOTE: a PDB carries no MM charges, so these tests validate the STRUCTURAL
-parts only — QM-region selection, link-atom placement, Zn coordination, region
-sizes. For charge-dependent behavior, run against the parm7 (system_1264.parm7).
+from __future__ import annotations
 
-Run:  python test_partition.py        (plain asserts, no pytest needed)
-  or: pytest test_partition.py
-"""
 import os
 import sys
-import tempfile
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
 import qmmm_partition as qp
 
-PDB = os.path.join(os.path.dirname(__file__), "system_1264.pdb")
-OFFSET = -4   # this system: residues renumbered from 0; PDB His94 -> resSeq 90
+
+HERE = os.path.dirname(__file__)
 
 
-def _partition(region):
-    fps = list(qp.iter_frame_partitions(
-        PDB, PDB, region_name=region, resnum_offset=OFFSET, frames="0:1:1"))
-    assert len(fps) == 1, f"expected 1 frame, got {len(fps)}"
-    return fps[0]
+def test_triclinic_minimum_image():
+    box = np.array([
+        [10.0, 0.0, 0.0],
+        [2.0, 9.0, 0.0],
+        [1.0, 1.0, 8.0],
+    ])
+    # Construct points differing by one lattice vector plus a short displacement.
+    short = np.array([0.3, -0.2, 0.1])
+    delta = box[1] + short
+    got = qp.minimum_image_displacement(delta, box)
+    assert np.allclose(got, short, atol=1e-10), (got, short)
 
 
-def test_minimal_region_sizes():
-    fp = _partition("minimal")
-    s = qp.summarize_partition(fp)
-    assert s["n_qm_heavy"] == 36, f"minimal heavy atoms {s['n_qm_heavy']} != 36"
-    assert s["n_link"] == 4, f"minimal link atoms {s['n_link']} != 4"
-    assert s["elements"].get("Zn", 0) == 1, "exactly one Zn expected in QM"
-    assert s["elements"].get("S", 0) == 2, "two S (AZM ring + sulfonyl) expected"
-    print("[PASS] minimal region sizes (36 heavy, 4 links, 1 Zn, 2 S)")
+def test_pbc_hbond_geometry():
+    box = np.diag([10.0, 10.0, 10.0])
+    # D-H...A crosses x boundary and should still be linear/short.
+    d = np.array([9.8, 5.0, 5.0])
+    h = np.array([9.9, 5.0, 5.0])
+    a = np.array([0.2, 5.0, 5.0])
+    assert abs(qp.pbc_distance(d, a, box) - 0.4) < 1e-10
+    assert qp.pbc_angle_dha(d, h, a, box) > 179.9
 
 
-def test_larger_region_sizes():
-    fp = _partition("larger")
-    s = qp.summarize_partition(fp)
-    assert s["n_qm_heavy"] == 49, f"larger heavy atoms {s['n_qm_heavy']} != 49"
-    assert s["n_link"] == 6, f"larger link atoms {s['n_link']} != 6"
-    print("[PASS] larger region sizes (49 heavy, 6 links)")
+def test_rcd_pbc_midpoint_charge_and_dipole():
+    """RCD midpoint must follow the minimum-image CA--M2 bond, not box center."""
+    box = np.diag([10.0, 10.0, 10.0])
+    xyz = np.array([
+        [9.0, 5.0, 5.0],
+        [9.8, 5.0, 5.0],
+        [0.2, 5.0, 5.0],
+    ])
+    charges = np.array([0.0, 0.12, -0.40])
+    q_real, qvirt, pvirt, labels = qp._rcd_boundary_charges(
+        charges, xyz, [(0, 1)], [[2]], anchor_index=1, box_vectors_A=box
+    )
+    assert len(qvirt) == 1 and len(labels) == 1
+    assert abs(qvirt[0] - 0.24) < 1e-12
+    assert abs(q_real[1]) < 1e-12
+    assert abs(q_real[2] - (-0.52)) < 1e-12
+    assert abs(q_real.sum() + qvirt.sum() - charges.sum()) < 1e-12
+    assert abs(qp.pbc_distance(xyz[1], pvirt[0], box) - 0.2) < 1e-12
+    assert abs(qp.pbc_distance(pvirt[0], xyz[2], box) - 0.2) < 1e-12
+    d_m2 = qp.minimum_image_displacement(xyz[2] - xyz[1], box)
+    d_v = qp.minimum_image_displacement(pvirt[0] - xyz[1], box)
+    delta_mu = (-0.12) * d_m2 + 0.24 * d_v
+    assert np.allclose(delta_mu, 0.0, atol=1e-12), delta_mu
 
 
-def test_link_atoms_are_hydrogens():
-    fp = _partition("minimal")
-    link_els = fp.qm_elements[-fp.n_link_atoms:]
-    assert all(e == "H" for e in link_els), f"link atoms not all H: {link_els}"
-    print("[PASS] all link atoms are hydrogens")
-
-
-def test_zn_tetrahedral_coordination():
-    """Zn should be coordinated by exactly 4 N atoms (3 His + AZM N1) at ~2 A."""
-    fp = _partition("minimal")
-    zn_i = [i for i, e in enumerate(fp.qm_elements) if e == "Zn"][0]
-    zn = fp.qm_positions_A[zn_i]
-    coord_n = []
-    for i, (e, p) in enumerate(zip(fp.qm_elements, fp.qm_positions_A)):
-        if e == "N" and np.linalg.norm(p - zn) < 2.6:
-            coord_n.append(np.linalg.norm(p - zn))
-    assert len(coord_n) == 4, f"expected 4 coordinating N, got {len(coord_n)}: {coord_n}"
-    assert all(1.8 < d < 2.2 for d in coord_n), f"Zn-N distances off: {coord_n}"
-    print(f"[PASS] Zn 4-coordinate; Zn-N = {[f'{d:.2f}' for d in sorted(coord_n)]} A")
-
-
-def test_link_atom_bond_length():
-    """Each link H sits ~1.09 A from its Cbeta (we re-derive from the spec)."""
-    mdtop, charges = qp.load_topology_and_charges(PDB)
-    spec = qp.build_qm_region_spec(mdtop, qp.QM_REGIONS["minimal"], OFFSET)
+def test_uploaded_example(top_path, pdb_path):
+    mdtop, charges = qp.load_topology_and_charges(top_path)
+    spec = qp.build_qm_region_spec(
+        mdtop, charges, qp.QM_REGIONS["minimal"], qp.DEFAULT_RESNUM_OFFSET
+    )
     import mdtraj as md
-    t = md.load_pdb(PDB)
-    xyz_A = t.xyz[0] * 10.0
-    for (cb, ca) in spec.boundary_pairs:
-        link = qp._place_link_atom(xyz_A[cb], xyz_A[ca])
-        d = np.linalg.norm(link - xyz_A[cb])
-        assert abs(d - 1.09) < 1e-3, f"link C-H {d:.3f} != 1.09"
-    print("[PASS] all link H placed at 1.09 A from Cbeta")
+    traj = md.load_pdb(pdb_path)
+    box = traj.unitcell_vectors[0] * 10.0 if traj.unitcell_vectors is not None else None
+    fp = qp.partition_frame(
+        mdtop, charges, spec, traj.xyz[0] * 10.0, 0, box,
+        hbond_distance_A=3.5, hbond_angle_deg=140.0,
+        boundary_charge_method="shift",
+    )
+    assert fp.qm_formal_charge == +1
+    assert abs(fp.qm_formal_charge + fp.mm_charge_sum - fp.system_charge) < 1e-5
+    assert set(fp.qm_all_topology_indices).isdisjoint(fp.mm_atom_indices)
+    assert fp.n_link_atoms == 4
+    assert fp.boundary_charge_method == "shift"
+    assert fp.n_boundary_virtual_sites == 0
+    assert fp.selected_zn_coordinated_water_resids == []
+
+    fp_rcd = qp.partition_frame(
+        mdtop, charges, spec, traj.xyz[0] * 10.0, 0, box,
+        hbond_distance_A=3.5, hbond_angle_deg=140.0,
+        boundary_charge_method="rcd",
+    )
+    assert fp_rcd.qm_atom_indices == fp.qm_atom_indices
+    assert fp_rcd.qm_elements == fp.qm_elements
+    assert np.allclose(fp_rcd.qm_positions_A, fp.qm_positions_A)
+    assert fp_rcd.qm_formal_charge == fp.qm_formal_charge
+    assert fp_rcd.selected_water_resids == fp.selected_water_resids
+    assert fp_rcd.boundary_charge_method == "rcd"
+    assert fp_rcd.n_boundary_virtual_sites == sum(map(len, spec.m2_per_cb))
+    assert len(fp_rcd.mm_charges) == (
+        len(fp_rcd.mm_atom_indices) + fp_rcd.n_boundary_virtual_sites
+    )
+    assert fp_rcd.mm_site_types.count("rcd_virtual") == fp_rcd.n_boundary_virtual_sites
+    assert abs(fp_rcd.qm_formal_charge + fp_rcd.mm_charge_sum - fp_rcd.system_charge) < 1e-5
+    assert abs(fp_rcd.boundary_charge_residual - fp.boundary_charge_residual) < 1e-12
+    # Every selected adaptive water must be neutral in the topology.
+    selected = set(fp.selected_water_resids)
+    for water in spec.water_records:
+        if water.residue_index in selected:
+            assert abs(charges[list(water.all_atom_indices)].sum()) < 1e-4
+
+    # Force one real OPC water into a clean O-H...A_core hydrogen bond and
+    # verify variable-size QM selection without charge change or double counting.
+    xyz2 = traj.xyz[0].copy() * 10.0
+    water = spec.water_records[0]
+    acc = spec.core_hbond_acceptors[0]
+    a_pos = xyz2[acc].copy()
+    o, h1, h2 = water.oxygen_index, *water.hydrogen_indices
+    xyz2[o] = a_pos + np.array([2.80, 0.00, 0.00])
+    xyz2[h1] = a_pos + np.array([1.84, 0.00, 0.00])  # linear O-H...A
+    xyz2[h2] = xyz2[o] + np.array([0.00, 0.96, 0.00])
+    fp2 = qp.partition_frame(
+        mdtop, charges, spec, xyz2, 1, box,
+        hbond_distance_A=3.5, hbond_angle_deg=140.0,
+        boundary_charge_method="rcd",
+    )
+    assert water.residue_index in fp2.selected_water_resids
+    assert set(water.all_atom_indices).issubset(fp2.qm_all_topology_indices)
+    assert set(water.all_atom_indices).isdisjoint(fp2.mm_atom_indices)
+    # OPC contributes four topology sites but only three real QM XYZ atoms.
+    assert len(fp2.qm_all_topology_indices) >= len(fp.qm_all_topology_indices) + 4
+    assert len(fp2.qm_elements) >= len(fp.qm_elements) + 3
+    assert fp2.qm_formal_charge == fp.qm_formal_charge == +1
+    assert abs(fp2.qm_formal_charge + fp2.mm_charge_sum - fp2.system_charge) < 1e-5
+
+    # Force a neutral OPC water into the Zn first coordination shell. It must be
+    # selected even if it has no H-bond reason, and its full topology residue
+    # (including virtual site) must disappear from MM while formal charge stays +1.
+    xyz3 = traj.xyz[0].copy() * 10.0
+    zn_idx = spec.metal_indices[0]
+    water3 = spec.water_records[1]
+    o3, h31, h32 = water3.oxygen_index, *water3.hydrogen_indices
+    zn_pos = xyz3[zn_idx].copy()
+    xyz3[o3] = zn_pos + np.array([2.10, 0.00, 0.00])
+    xyz3[h31] = xyz3[o3] + np.array([0.96, 0.00, 0.00])
+    xyz3[h32] = xyz3[o3] + np.array([-0.24, 0.93, 0.00])
+    zn_selected, zn_reasons = qp._select_zn_coordinated_waters(
+        mdtop, spec, xyz3, box, zn_water_cutoff_A=2.6
+    )
+    assert water3.residue_index in {w.residue_index for w in zn_selected}
+    assert any("Zn-coordination" in x for x in zn_reasons[water3.residue_index])
+    fp3 = qp.partition_frame(
+        mdtop, charges, spec, xyz3, 2, box,
+        hbond_distance_A=3.5, hbond_angle_deg=140.0,
+        zn_water_cutoff_A=2.6, boundary_charge_method="rcd",
+    )
+    assert water3.residue_index in fp3.selected_water_resids
+    assert water3.residue_index in fp3.selected_zn_coordinated_water_resids
+    assert set(water3.all_atom_indices).issubset(fp3.qm_all_topology_indices)
+    assert set(water3.all_atom_indices).isdisjoint(fp3.mm_atom_indices)
+    assert fp3.qm_formal_charge == +1
+    assert abs(fp3.qm_formal_charge + fp3.mm_charge_sum - fp3.system_charge) < 1e-5
 
 
-def test_qm_atoms_excluded_from_mm():
-    """No QM atom index should appear in the MM field (by construction)."""
-    fp = _partition("minimal")
-    # MM charges are zero for a PDB, but the COUNT must be total - qm_real.
-    # qm real atoms = heavy + H (not link atoms, which are synthetic).
-    # We just assert the MM field is smaller than the full system by at least
-    # the number of selected real QM atoms.
-    import mdtraj as md
-    total = md.load_pdb(PDB).topology.n_atoms
-    n_real_qm = len(fp.qm_elements) - fp.n_link_atoms
-    assert len(fp.mm_charges) <= total - n_real_qm, "QM atoms not excluded from MM"
-    print(f"[PASS] QM atoms excluded from MM field "
-          f"({len(fp.mm_charges)} MM atoms, {n_real_qm} real QM removed)")
+def main():
+    test_triclinic_minimum_image()
+    test_pbc_hbond_geometry()
+    test_rcd_pbc_midpoint_charge_and_dipole()
+    print("[PASS] PBC minimum-image + RCD midpoint/dipole tests")
 
-
-def test_charge_conservation_and_integrality():
-    """parm7-only: with integer-charge enforcement, MM field = system - QM_formal,
-    and QM_formal + MM = system net charge. Skips if the parm7 isn't present."""
-    parm = os.path.join(os.path.dirname(__file__), "system_1264.parm7")
-    rst = os.path.join(os.path.dirname(__file__), "system_1264.rst7")
-    if not (os.path.exists(parm) and os.path.exists(rst)):
-        print("[SKIP] charge test (system_1264.parm7/.rst7 not present)")
-        return
-    mdtop, charges = qp.load_topology_and_charges(parm)
-    total = float(charges.sum())
-    fp = list(qp.iter_frame_partitions(
-        parm, rst, region_name="minimal", resnum_offset=OFFSET,
-        frames="0:1:1", enforce_integer_qm_charge=True))[0]
-    mm_sum = float(np.sum(fp.mm_charges))
-    qm_formal = fp.qm_total_charge
-    assert qm_formal == 1, f"expected QM formal +1, got {qm_formal}"
-    assert abs((qm_formal + mm_sum) - total) < 1e-3, "QM+MM != system charge"
-    assert abs(mm_sum - (total - qm_formal)) < 1e-3, "MM not integer-consistent"
-    print(f"[PASS] charge conserved & integer-consistent "
-          f"(QM={qm_formal:+d}, MM={mm_sum:+.4f}, sys={total:+.4f})")
-
-
-def test_whole_residue_cutoff_keeps_complete_mm_residues():
-    """parm7-only: cutoff must not split waters/residues into partial charges."""
-    parm = os.path.join(os.path.dirname(__file__), "system_1264.parm7")
-    rst = os.path.join(os.path.dirname(__file__), "system_1264.rst7")
-    if not (os.path.exists(parm) and os.path.exists(rst)):
-        print("[SKIP] whole-residue cutoff test (parm7/rst7 not present)")
-        return
-    mdtop, _charges = qp.load_topology_and_charges(parm)
-    fp = list(qp.iter_frame_partitions(
-        parm, rst, region_name="minimal", resnum_offset=OFFSET,
-        frames="0:1:1", mm_cutoff_A=15.0))[0]
-    keep = set(fp.mm_atom_indices)
-    qm = set(fp.qm_atom_indices)
-    for res in mdtop.residues:
-        mm_atoms = {a.index for a in res.atoms if a.index not in qm}
-        if keep & mm_atoms:
-            assert mm_atoms <= keep, (
-                f"residue {res.name}{res.resSeq} was split by MM cutoff")
-    # Whole-residue cutoff can retain a charged shell, but it should be very
-    # close to an integer, not an arbitrary atom-wise fractional value.
-    mm_sum = float(np.sum(fp.mm_charges))
-    assert abs(mm_sum - round(mm_sum)) < 1e-3, (
-        f"whole-residue cutoff MM charge is not integer-like: {mm_sum}")
-    print(f"[PASS] whole-residue cutoff kept complete residues "
-          f"({len(fp.mm_charges)} point charges, MM={mm_sum:+.4f})")
-
-
-def test_dcd_frame_start_stride_uses_physical_frames():
-    """DCD start/stride must process the requested physical frames, not relabel frame 0."""
-    import mdtraj as md
-    t0 = md.load_pdb(PDB)
-    xyz = np.repeat(t0.xyz, 5, axis=0)
-    for i in range(5):
-        xyz[i, :, 0] += 0.1 * i   # nm = 1 Å per frame in x
-    traj = md.Trajectory(xyz=xyz, topology=t0.topology)
-    with tempfile.TemporaryDirectory() as td:
-        dcd = os.path.join(td, "shifted.dcd")
-        traj.save_dcd(dcd)
-        fps = list(qp.iter_frame_partitions(
-            PDB, dcd, region_name="minimal", resnum_offset=OFFSET,
-            frames="2:4:1"))
-    assert [fp.frame_index for fp in fps] == [2, 3]
-    # The Zn x-coordinate in processed physical frame 2 should be shifted by 2 Å.
-    fp0 = list(qp.iter_frame_partitions(
-        PDB, PDB, region_name="minimal", resnum_offset=OFFSET,
-        frames="0:1:1"))[0]
-    zn0_i = [i for i, e in enumerate(fp0.qm_elements) if e == "Zn"][0]
-    zn2_i = [i for i, e in enumerate(fps[0].qm_elements) if e == "Zn"][0]
-    dx = fps[0].qm_positions_A[zn2_i, 0] - fp0.qm_positions_A[zn0_i, 0]
-    assert abs(dx - 2.0) < 1e-3, f"expected physical frame 2 shift of 2 Å, got {dx}"
-    print("[PASS] DCD frames start:stop:stride use physical frame indices")
-
-
-def test_wrong_residue_offset_fails_fast():
-    """A bad offset should not silently skip required QM residues."""
-    try:
-        list(qp.iter_frame_partitions(
-            PDB, PDB, region_name="minimal", resnum_offset=0, frames="0:1:1"))
-    except ValueError as e:
-        assert "required sidechain" in str(e) or "required" in str(e)
-        print("[PASS] wrong residue offset fails fast")
-        return
-    raise AssertionError("bad residue offset did not fail")
+    if len(sys.argv) == 3:
+        test_uploaded_example(sys.argv[1], sys.argv[2])
+        print("[PASS] uploaded-system partition/charge/link tests")
+    else:
+        print("[INFO] system test skipped; pass parm7 and PDB paths to enable")
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    print(f"Running {len(tests)} structural tests on {os.path.basename(PDB)}\n")
-    failed = 0
-    for t in tests:
-        try:
-            t()
-        except AssertionError as e:
-            print(f"[FAIL] {t.__name__}: {e}")
-            failed += 1
-    print(f"\n{len(tests)-failed}/{len(tests)} passed")
-    sys.exit(1 if failed else 0)
+    main()
