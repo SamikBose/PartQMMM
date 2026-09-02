@@ -127,14 +127,14 @@ def main():
         n += 1
         
         if n == 1 or n % 100 == 0:
-        summary = qp.summarize_partition(fp)
+            summary = qp.summarize_partition(fp)
             print(
                 f"Processed {n} frames; latest frame={fp.frame_index}; "
                 f"waters={len(fp.selected_water_resids)}; "
                 f"QM atoms={len(fp.qm_elements)}; "
                 f"MM charges={len(fp.mm_charges)}",
                 flush=True,
-                )
+            )
         
         #summary = qp.summarize_partition(fp)
         #print(json.dumps(summary, sort_keys=True))
