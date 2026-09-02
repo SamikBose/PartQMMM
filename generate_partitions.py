@@ -124,13 +124,24 @@ def main():
         mm_path = outdir / f"frame_{tag}_mm.pc"
         write_qm_xyz(qm_path, fp)
         write_mm_pc(mm_path, fp)
-
-        summary = qp.summarize_partition(fp)
-        print(json.dumps(summary, sort_keys=True))
-        for resid, reasons in fp.selected_water_reasons.items():
-            for reason in reasons:
-                print(f"  water_resid={resid}: {reason}")
         n += 1
+        
+        if n == 1 or n % 100 == 0:
+        summary = qp.summarize_partition(fp)
+            print(
+                f"Processed {n} frames; latest frame={fp.frame_index}; "
+                f"waters={len(fp.selected_water_resids)}; "
+                f"QM atoms={len(fp.qm_elements)}; "
+                f"MM charges={len(fp.mm_charges)}",
+                flush=True,
+                )
+        
+        #summary = qp.summarize_partition(fp)
+        #print(json.dumps(summary, sort_keys=True))
+        #for resid, reasons in fp.selected_water_reasons.items():
+        #    for reason in reasons:
+        #        print(f"  water_resid={resid}: {reason}")
+        #n += 1
 
     print(f"Done: wrote {n} snapshot pair(s) to {outdir}")
     if expected_qm_charge is not None:
